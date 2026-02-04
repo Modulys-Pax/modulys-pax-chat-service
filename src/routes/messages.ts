@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { withTenantDb } from '../db/tenant-db.js';
+import { broadcastNewMessage } from '../ws/socket-handlers.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('routes:messages');
@@ -53,14 +54,30 @@ export async function registerMessageRoutes(app: FastifyInstance): Promise<void>
       return reply.code(400).send({ error: 'employee_id and content are required' });
     }
     try {
-      const message = await withTenantDb(tenantId, async (client) => {
+      const { message, senderName } = await withTenantDb(tenantId, async (client) => {
         const res = await client.query(
           `INSERT INTO chat_messages (channel_id, employee_id, content)
            VALUES ($1, $2, $3)
            RETURNING id, channel_id, employee_id, content, created_at, updated_at`,
           [channelId, employee_id, content],
         );
-        return res.rows[0];
+        const row = res.rows[0];
+        const nameRes = await client.query<{ name: string }>(
+          `SELECT name FROM employees WHERE id = $1 LIMIT 1`,
+          [row.employee_id],
+        );
+        return { message: row, senderName: nameRes.rows[0]?.name ?? '' };
+      });
+      const createdAt = typeof message.created_at === 'string' ? message.created_at : (message.created_at as Date)?.toISOString?.() ?? new Date().toISOString();
+      broadcastNewMessage(tenantId, channelId, {
+        id: message.id,
+        conversationId: channelId,
+        senderId: message.employee_id,
+        senderName,
+        type: 'TEXT',
+        content: message.content,
+        attachments: [],
+        createdAt,
       });
       return reply.code(201).send(message);
     } catch (e: any) {
