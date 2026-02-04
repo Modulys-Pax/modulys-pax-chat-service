@@ -13,6 +13,15 @@ interface ServiceConfig {
   port: number;
 }
 
+function getCorsOrigin(): boolean | string[] {
+  const isProduction = process.env.NODE_ENV === 'production';
+  const origin = process.env.PAX_CORS_ORIGIN?.trim();
+  if (isProduction && origin) {
+    return origin.split(',').map((o) => o.trim()).filter(Boolean);
+  }
+  return true;
+}
+
 let app: FastifyInstance;
 
 async function initialize(): Promise<void> {
@@ -22,7 +31,7 @@ async function initialize(): Promise<void> {
 
   app = fastify({ logger: false, trustProxy: true });
 
-  await app.register(cors, { origin: true, credentials: true });
+  await app.register(cors, { origin: getCorsOrigin(), credentials: true });
 
   await registerRoutes(app);
 
@@ -38,7 +47,7 @@ async function initialize(): Promise<void> {
   if (httpServer) {
     const io = new SocketIoServer(httpServer, {
       path: '/socket.io',
-      cors: { origin: true, credentials: true },
+      cors: { origin: getCorsOrigin(), credentials: true },
     });
     attachSocketHandlers(io);
     log.info('Socket.IO attached at namespace /chat');
